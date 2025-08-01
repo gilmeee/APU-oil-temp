@@ -10,6 +10,22 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
 
+# --- CSS를 이용한 버튼 스타일 변경 ---
+st.markdown("""
+<style>
+div.stButton > button:first-child {
+    background-color: #000080; /* 남색 */
+    color: white; /* 글자색 */
+    border: none; /* 테두리 없음 */
+}
+div.stButton > button:hover {
+    background-color: #0000CD; /* 마우스 올렸을 때 색상 */
+    color: white;
+    border: none;
+}
+</style>""", unsafe_allow_html=True)
+
+
 # Matplotlib 한글 폰트 설정 (필요 시, 맞는 폰트 이름으로 변경)
 # from matplotlib import font_manager, rc
 # font_path = "c:/Windows/Fonts/malgun.ttf"
@@ -20,8 +36,8 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # --- Streamlit 페이지 설정 ---
-st.set_page_config(layout="wide", page_title="APU 성능 예측 대시보드")
-st.title('✈️ APU 성능 예측 인터랙티브 대시보드')
+st.set_page_config(layout="wide", page_title="APU Oil Temp 예측 인터랙티브 대시보드")
+st.title('APU Oil Temp 예측 인터랙티브 대시보드')
 
 # --- 데이터 로딩 및 전처리 함수 (캐싱으로 속도 향상) ---
 @st.cache_data
@@ -34,8 +50,6 @@ def load_data():
 
         df_data.dropna(how='all', axis=1, inplace=True)
         df_data['CREATION_DATE'] = pd.to_datetime(df_data['CREATION_DATE'])
-        # 원본 코드의 N3LOT 기반 dropna를 유지하되, 다른 타겟을 선택할 경우를 대비해 유연성 고려
-        df_data.dropna(subset=['N3LOT'], inplace=True)
 
         too_high['NR_REQUEST_DATE'] = pd.to_datetime(too_high['NR_REQUEST_DATE'], errors='coerce')
         maint['NR_REQUEST_DATE'] = pd.to_datetime(maint['NR_REQUEST_DATE'], errors='coerce')
@@ -44,6 +58,26 @@ def load_data():
     except FileNotFoundError as e:
         st.error(f"오류: '{e.filename}' 파일을 찾을 수 없습니다. CSV 파일들이 스크립트와 같은 폴더에 있는지 확인해주세요.")
         return None, None, None
+
+        
+# --- 데이터 전처리 및 변수 생성 함수 (재사용을 위해 함수로 정의) ---
+def preprocess_df(df_input):
+    df_output = df_input.copy()
+
+    if 'Date' in df_output.columns and not pd.api.types.is_datetime64_any_dtype(df_output['Date']):
+        df_output['Date'] = pd.to_datetime(df_output['Date'])
+    elif 'Date' not in df_output.columns:
+        raise KeyError("Error: 'Date' column not found in the dataframe. Please ensure your data has a 'Date' column.")
+
+    if 'REGNO' in df_output.columns:
+        df_output.rename(columns={'REGNO': 'HL_no'}, inplace=True)
+    elif 'HL_no' not in df_output.columns:
+        raise KeyError("Error: Neither 'REGNO' nor 'HL_no' column found for aircraft identification. One of them is required.")
+
+    if 'HL_no' in df_output.columns and 'Date' in df_output.columns:
+        df_output = df_output.sort_values(by=['HL_no', 'Date'])
+    else:
+        print("Warning: Cannot sort by 'HL_no' or 'Date' as one or both columns are missing.")
 
 # '정상' 데이터 마스크 함수
 def get_normal_data_mask(df, fault_df, maint_df, tail_num, window_days=7):
@@ -66,8 +100,34 @@ if df_data is not None:
     # --- 사이드바 UI 구성 ---
     st.sidebar.header('⚙️ 모델 파라미터 선택')
 
-    all_features = ['N3EGTA', 'N3GLA', 'N3WB', 'N3PT', 'N3P2A', 'N3LCOT', 'N3LCIT', 'N3IGV', 'N3SCV', 'N3HOT']
-    all_targets =  ['N3EGTA', 'N3GLA', 'N3WB', 'N3PT', 'N3P2A', 'N3LCOT', 'N3LCIT', 'N3IGV', 'N3SCV', 'N3HOT']
+    # 버튼, 멀티셀렉트, 드롭다운 메뉴 등 사이드바 UI 요소를 남색 테마로 변경
+    st.markdown("""
+    <style>
+    /* 분석 시작 버튼 */
+    div.stButton > button:first-child {
+        background-color: #000080; /* 남색 */
+        color: white;
+        border: none;
+    }
+    div.stButton > button:hover {
+        background-color: #4682B4; /* 마우스 올렸을 때 밝은 남색 */
+        color: white;
+        border: none;
+    }
+
+    /* 피처 선택(멀티셀렉트)의 선택된 항목 */
+    span[data-baseweb="tag"] {
+        background-color: #000080 !important;
+    }
+
+    /* 드롭다운 메뉴에 마우스를 올렸을 때 */
+    li[data-baseweb="menu-item-wrapper"]:hover {
+        background-color: #4682B4;
+    }
+    </style>""", unsafe_allow_html=True)
+
+    all_features = ['N3EGTA', 'N3GLA', 'N3WB', 'N3PT', 'N3P2A', 'N3LCOT', 'N3LCIT', 'N3IGV', 'N3SCV', 'N3HOT', 'N3LOT']
+    all_targets =  ['N3EGTA', 'N3GLA', 'N3WB', 'N3PT', 'N3P2A', 'N3LCOT', 'N3LCIT', 'N3IGV', 'N3SCV', 'N3HOT', 'N3LOT']
     available_tails = sorted(df_data['REGNO'].unique().astype(str))
 
     selected_tail = st.sidebar.selectbox('1. 항공기 기번 선택:', available_tails, index=available_tails.index('HL8001'))
