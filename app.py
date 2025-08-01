@@ -188,7 +188,7 @@ if df_data is not None:
                         fig2, axes2 = plt.subplots(2, 1, figsize=(15, 10), sharex=True)
                         sns.lineplot(x='CREATION_DATE', y=target, data=df_test_tail, label=f'Actual {target}', color='blue', ax=axes2[0], marker='o', markersize=3)
                         sns.lineplot(x='CREATION_DATE', y='Predicted', data=df_test_tail, label=f'Predicted {target}', color='red', linestyle='--', ax=axes2[0])
-                        # (코드 중략) 원본과 동일한 정비 기록 시각화 로직
+                        # (코드 중략) 원본과 동일한 정비 기록 시각화 로직 ..
                         for i, date in enumerate(fault_dates_test):
                             axes2[0].axvline(x=date, color='black', linestyle='-', linewidth=1.5, label='High Temp Fault' if i == 0 else "")
                         
