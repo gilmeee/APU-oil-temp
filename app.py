@@ -25,13 +25,6 @@ div.stButton > button:hover {
 }
 </style>""", unsafe_allow_html=True)
 
-
-# Matplotlib 한글 폰트 설정 (필요 시, 맞는 폰트 이름으로 변경)
-# from matplotlib import font_manager, rc
-# font_path = "c:/Windows/Fonts/malgun.ttf"
-# font = font_manager.FontProperties(fname=font_path).get_name()
-# rc('font', family=font)
-
 # 경고 메시지 무시
 warnings.filterwarnings('ignore')
 
