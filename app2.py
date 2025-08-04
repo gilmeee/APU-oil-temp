@@ -94,14 +94,14 @@ def preprocess_data():
         df_data['month_cos'] = np.cos(2 * np.pi * df_data['month'] / 12)
 
         # 4. MALFUNCTION 특성 생성 (MALFUNCTION_ATA X)
-        maint_for_merge = maint[['AC_NO', 'NR_REQUEST_DATE', 'MALFUNCTION']].copy()
+        maint_for_merge = maint[['AC_NO', 'NR_REQUEST_DATE', 'MALFUNCTION_ATA']].copy()
         maint_for_merge.rename(columns={'NR_REQUEST_DATE': 'DATE'}, inplace=True)
-        maint_for_merge.dropna(subset=['MALFUNCTION'], inplace=True)
-        maint_for_merge['MALFUNCTION'] = maint_for_merge['MALFUNCTION'].astype(str)
+        maint_for_merge.dropna(subset=['MALFUNCTION_ATA'], inplace=True)
+        maint_for_merge['MALFUNCTION_ATA'] = maint_for_merge['MALFUNCTION_ATA'].astype(str)
 
         maint_ata_pivot = maint_for_merge.pivot_table(
             index=['AC_NO', 'DATE'],
-            columns='MALFUNCTION',
+            columns='MALFUNCTION_ATA',
             aggfunc=lambda x: 1,
             fill_value=0
         ).reset_index()
@@ -181,20 +181,31 @@ if df_processed is not None:
     # 사용 가능한 피처 및 타겟 목록 정의
     base_features = ['N3EGTA', 'N3GLA', 'N3WB', 'N3PT', 'N3P2A', 'N3LCOT', 'N3LCIT', 'N3IGV', 'N3SCV', 'N3HOT', 'N3LOT']
     time_features = ['hour', 'month_sin', 'month_cos', 'dayofweek']
+
+    # UI 표시용 이름 생성 함수
+    format_feature_name = lambda name: name.replace('N3', '')
+
     
     # 1. 분석할 항공기 선택
     available_tails = sorted(df_processed['AC_NO'].unique().astype(str))
     selected_tail = st.sidebar.selectbox('1. 분석할 항공기 선택:', available_tails, index=available_tails.index('HL8001'))
     
     # 2. 예측 타겟 변수 선택
-    selected_target = st.sidebar.selectbox('2. 예측 타겟 변수 선택:', base_features, index=len(base_features)-1) # N3LOT를 기본값으로
+    selected_target = st.sidebar.selectbox(
+        '2. 예측 타겟 변수 선택:',
+        options=base_features,
+        index=len(base_features)-1, # N3LOT를 기본값으로
+        format_func=format_feature_name # UI에 표시될 이름 포맷 지정
+    )
     
     # 3. 학습 피처 변수 선택 (타겟으로 선택된 변수는 피처에서 제외)
-    available_features = [f for f in base_features if f != selected_target] + time_features
     available_features_for_ui = [f for f in base_features if f != selected_target]
-    selected_base_features = st.sidebar.multiselect('3. 학습 피처 선택:',
-                                                    available_features_for_ui,
-                                                    default=available_features_for_ui)
+    selected_base_features = st.sidebar.multiselect(
+        '3. 학습 피처 선택:',
+        options=available_features_for_ui,
+        default=available_features_for_ui,
+        format_func=format_feature_name # UI에 표시될 이름 포맷 지정
+    )
 
     # --- 분석 시작 버튼 ---
     if st.sidebar.button('📊 분석 시작', type="primary"):
@@ -212,6 +223,9 @@ if df_processed is not None:
 
             # 모델 학습 함수 호출
             trained_pipeline, cv_scores = train_unified_model(df_processed, selected_target, numerical_features, categorical_features)
+            
+            # 표시용 타겟 이름 생성
+            display_target_name = format_feature_name(selected_target)
 
             # # 교차검증 결과 표시
             # st.write("시계열 교차검증(TimeSeriesSplit, n=5) 평균 성능:")
@@ -223,7 +237,7 @@ if df_processed is not None:
             # st.markdown("---")
 
             # --- 2. 선택한 항공기 예측 및 분석 ---
-            st.subheader(f"{selected_tail} - {selected_target} 예측 분석 (2025/01~2025/08)")
+            st.subheader(f"{selected_tail} - {display_target_name} 예측 분석 (2025/01~2025/08)")
 
             # 전체 데이터에 대해 예측 수행
             df_processed['Predicted'] = trained_pipeline.predict(df_processed[all_model_features])
@@ -248,8 +262,8 @@ if df_processed is not None:
                 maint_dates = maint[(maint['AC_NO'] == selected_tail) & (maint['NR_REQUEST_DATE'].between(start_date, end_date))]['NR_REQUEST_DATE'].dropna()
                 
                 # 상단 그래프: 실제값 vs 예측값
-                sns.lineplot(x='DATE', y=selected_target, data=df_plot, label=f'실제 {selected_target}', color='blue', ax=axes[0], marker='o', markersize=3, alpha=0.7)
-                sns.lineplot(x='DATE', y='Predicted', data=df_plot, label=f'예측 {selected_target}', color='red', linestyle='--', ax=axes[0])
+                sns.lineplot(x='DATE', y=selected_target, data=df_plot, label=f'실제 {display_target_name}', color='blue', ax=axes[0], marker='o', markersize=3, alpha=0.7)
+                sns.lineplot(x='DATE', y='Predicted', data=df_plot, label=f'예측 {display_target_name}', color='red', linestyle='--', ax=axes[0])
                 
                 for i, date in enumerate(fault_dates):
                     axes[0].axvline(x=date, color='black', linestyle='-', linewidth=1.5, label='고온 결함' if i == 0 else "")
@@ -257,8 +271,8 @@ if df_processed is not None:
                 for i, date in enumerate(maint_dates.unique()):
                     axes[0].axvline(x=date, color='darkorange', linestyle=':', linewidth=2, alpha=0.9, label='정비 기록' if i == 0 else "")
 
-                axes[0].set_title(f'{selected_tail} - {selected_target} 예측값 분석 (2025/01 ~ 2025/08)', fontsize=16)
-                axes[0].set_ylabel(f'{selected_target} 값')
+                axes[0].set_title(f'{selected_tail} - {display_target_name} 예측값 분석 (2025/01 ~ 2025/08)', fontsize=16)
+                axes[0].set_ylabel(f'{display_target_name} 값')
                 axes[0].grid(True, linestyle='--', alpha=0.6)
                 axes[0].legend()
 
@@ -289,7 +303,7 @@ if df_processed is not None:
                 if not maint_records.empty:
                     maint_records['DATE_STR'] = maint_records['NR_REQUEST_DATE'].dt.strftime('%Y-%m-%d')
                     # 오래된 날짜 순으로 정렬하고, 인덱스를 1부터 시작하도록 수정
-                    display_df = maint_records[['DATE_STR', 'MALFUNCTION', 'CORRECTIVE_ACTION']].sort_values(by='DATE_STR', ascending=True)
+                    display_df = maint_records[['DATE_STR', 'MALFUNCTION_ATA', 'MALFUNCTION', 'CORRECTIVE_ACTION']].sort_values(by='DATE_STR', ascending=True)
                     display_df.index = np.arange(1, len(display_df) + 1)
                     st.dataframe(display_df)
                 else:
