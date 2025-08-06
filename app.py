@@ -1,281 +1,518 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import TimeSeriesSplit, GridSearchCV
-from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import TimeSeriesSplit
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.linear_model import Lasso
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
+from sklearn.ensemble import IsolationForest
+import plotly.express as px
+import plotly.graph_objects as go
+import base64
+import os
+import matplotlib.font_manager as fm
 
-# --- CSS를 이용한 버튼 스타일 변경 ---
-st.markdown("""
-<style>
-div.stButton > button:first-child {
-    background-color: #000080; /* 남색 */
-    color: white; /* 글자색 */
-    border: none; /* 테두리 없음 */
-}
-div.stButton > button:hover {
-    background-color: #0000CD; /* 마우스 올렸을 때 색상 */
-    color: white;
-    border: none;
-}
-</style>""", unsafe_allow_html=True)
 
-# 경고 메시지 무시
+# --- 기본 설정 ---
 warnings.filterwarnings('ignore')
+st.set_page_config(layout="wide", page_title="APU 결함 예측 및 데이터 분석 대시보드")
 
-# --- Streamlit 페이지 설정 ---
-st.set_page_config(layout="wide", page_title="APU Oil Temp 예측 인터랙티브 대시보드")
-st.title('APU Oil Temp 예측 인터랙티브 대시보드')
+# --- 폰트 파일 인코딩 함수 ---
+# 이 함수는 폰트 파일을 읽어서 CSS에서 사용할 수 있는 텍스트로 변환합니다.
+def encode_font(font_path):
+    # 파일이 존재하는지 확인합니다.
+    if not os.path.exists(font_path):
+        st.error(f"'{font_path}' 폰트 파일을 찾을 수 없습니다. 스크립트와 같은 폴더에 있는지 확인해주세요.")
+        return None
+    with open(font_path, 'rb') as f:
+        return base64.b64encode(f.read()).decode('utf-8')
 
-# --- 데이터 로딩 및 전처리 함수 (캐싱으로 속도 향상) ---
+# --- 폰트 인코딩 실행 ---
+# 일반 글씨체와 굵은 글씨체를 각각 불러옵니다.
+regular_font_encoded = encode_font("HanjinGroupSans.ttf")
+bold_font_encoded = encode_font("HanjinGroupSansBold.ttf")
+
+
+# --- CSS 스타일 ---
+# 폰트 인코딩이 성공했을 경우에만 CSS를 적용합니다.
+# --- CSS 스타일 ---
+# 폰트 인코딩이 성공했을 경우에만 CSS를 적용합니다.
+if regular_font_encoded and bold_font_encoded:
+    st.markdown(f"""
+    <style>
+        /* 1. 폰트 정의: 일반체와 굵은체를 모두 등록합니다 */
+        @font-face {{
+            font-family: 'Hanjin Group Sans';
+            src: url(data:font/ttf;base64,{regular_font_encoded}) format('truetype');
+            font-weight: normal;
+        }}
+
+        @font-face {{
+            font-family: 'Hanjin Group Sans';
+            src: url(data:font/ttf;base64,{bold_font_encoded}) format('truetype');
+            font-weight: bold;
+        }}
+
+        /* 2. 폰트 적용: 제목(h1) 등을 포함한 모든 요소에 강제로 적용합니다 */
+        html, body, [class*="st-"], h1, h2, h3, h4, h5, h6 {{
+            font-family: 'Hanjin Group Sans', sans-serif !important;
+        }}
+
+        /* Material Icon class에는 저희 폰트가 적용되지 않도록 예외 처리 */
+        .material-icons, .MuiIcon-root, .st-icon {{
+            font-family: 'Material Icons' !important;
+            font-style: normal;
+            font-weight: normal;
+            font-size: 24px;
+            line-height: 1;
+            letter-spacing: normal;
+            text-transform: none;
+            display: inline-block;
+            white-space: nowrap;
+            direction: ltr;
+            -webkit-font-feature-settings: 'liga';
+            -webkit-font-smoothing: antialiased;
+        }}
+
+        /* --- 이하 기존 스타일 유지 --- */
+        .stDataFrame th, .stDataFrame td {{
+            text-align: center !important;
+        }}
+        .stDataFrame thead tr th:first-child, .stDataFrame tbody tr th {{
+            text-align: left !important;
+        }}
+        div.stButton > button:first-child {{
+            background-color: #000080; color: white; border: none;
+            border-radius: 8px; padding: 16px 32px; font-size: 18px;
+            font-weight: bold; width: 100%;
+        }}
+        div.stButton > button:hover {{
+            background-color: #4682B4; color: white; border: none;
+        }}
+        span[data-baseweb="tag"], [data-testid="stTag"] {{
+            background-color: #000080 !important;
+            color: white !important;
+        }}
+        div[data-testid="stSelectbox"] div[data-baseweb="select"],
+        div[data-testid="stMultiSelect"] div[data-baseweb="select"] {{
+            background-color: white; border: 1px solid #000080;
+            border-radius: 5px; box-shadow: none;
+        }}
+        div[data-testid="stSelectbox"] div[data-baseweb="select"]:focus-within,
+        div[data-testid="stMultiSelect"] div[data-baseweb="select"]:focus-within {{
+            border-color: #000080;
+            box-shadow: 0 0 0 2px #4682B4 !important;
+            outline: none;
+        }}
+        .legend-container {{
+            display: flex; gap: 20px; margin-top: -10px; margin-bottom: 10px;
+        }}
+        .legend-item {{
+            display: flex; align-items: center; font-size: 14px;
+        }}
+        .color-box {{
+            width: 20px; height: 20px; margin-right: 8px; border: 1px solid #ccc;
+        }}
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- Matplotlib 한글 폰트 설정 ---
+# 그래프의 한글은 안정적인 '맑은 고딕'을 사용하도록 직접 지정합니다.
+plt.rcParams['font.family'] = 'Malgun Gothic'
+plt.rcParams['axes.unicode_minus'] = False
+# ----------------------------------
+
+# --- 타이틀 ---
+st.title('APU 결함 예측 및 데이터 분석 대시보드')
+st.caption('모든 항공기 데이터를 학습한 단일 통합 모델을 사용하여 특정 항공기의 상태를 예측하고 분석합니다.')
+
+# --- 데이터 로딩 및 전처리 (캐싱으로 속도 극대화) ---
 @st.cache_data
-def load_data():
-    """데이터를 로드하고 기본적인 전처리를 수행합니다."""
+def preprocess_data():
     try:
+        # 1. 데이터 로드
         df_data = pd.read_csv('APU_2023-06-29_2025-07-30_processedver2.csv')
-        too_high = pd.read_csv('APU_high_temp_maint.csv')
         maint = pd.read_csv('APU_maint.csv')
+        
+        # 컬럼 이름에서 'N3' 제거
+        df_data.rename(columns={
+            'CREATION_DATE': 'DATE',
+            'REGNO': 'AC_NO',
+            'N3EGTA': 'EGTA',
+            'N3GLA': 'GLA',
+            'N3WB': 'WB',
+            'N3PT': 'PT',
+            'N3P2A': 'P2A',
+            'N3LCOT': 'LCOT',
+            'N3LCIT': 'LCIT',
+            'N3IGV': 'IGV',
+            'N3SCV': 'SCV',
+            'N3HOT': 'HOT',
+            'N3LOT': 'LOT'
+        }, inplace=True)
 
-        df_data.dropna(how='all', axis=1, inplace=True)
-        df_data['CREATION_DATE'] = pd.to_datetime(df_data['CREATION_DATE'])
-
-        too_high['NR_REQUEST_DATE'] = pd.to_datetime(too_high['NR_REQUEST_DATE'], errors='coerce')
+        # 2. 기본 전처리 (날짜 변환 및 이름 통일)
+        df_data['DATE'] = pd.to_datetime(df_data['DATE'])
         maint['NR_REQUEST_DATE'] = pd.to_datetime(maint['NR_REQUEST_DATE'], errors='coerce')
         
-        return df_data, too_high, maint
+        # 3. 시간 관련 특성 생성
+        df_data = df_data.sort_values(by=['AC_NO', 'DATE'])
+        df_data['hour'] = df_data['DATE'].dt.hour
+        df_data['month'] = df_data['DATE'].dt.month
+        df_data['dayofweek'] = df_data['DATE'].dt.dayofweek
+        df_data['month_sin'] = np.sin(2 * np.pi * df_data['month'] / 12)
+        df_data['month_cos'] = np.cos(2 * np.pi * df_data['month'] / 12)
+
+        # 4. MALFUNCTION 특성 생성
+        maint_for_merge = maint[['AC_NO', 'NR_REQUEST_DATE', 'MALFUNCTION']].copy()
+        maint_for_merge.rename(columns={'NR_REQUEST_DATE': 'DATE'}, inplace=True)
+        maint_for_merge.dropna(subset=['MALFUNCTION'], inplace=True)
+        maint_for_merge['MALFUNCTION'] = maint_for_merge['MALFUNCTION'].astype(str)
+
+        maint_ata_pivot = maint_for_merge.pivot_table(
+            index=['AC_NO', 'DATE'],
+            columns='MALFUNCTION',
+            aggfunc=lambda x: 1,
+            fill_value=0
+        ).reset_index()
+        
+        # 멀티 인덱스 컬럼 이름 정리
+        new_cols = [f'ATA_{col}' for col in maint_ata_pivot.columns if col not in ['AC_NO', 'DATE']]
+        maint_ata_pivot.columns = ['AC_NO', 'DATE'] + new_cols
+        
+        # 5. 원본 데이터에 ATA 특성 병합
+        df_processed = pd.merge(df_data, maint_ata_pivot, on=['AC_NO', 'DATE'], how='left')
+        ata_cols = [col for col in df_processed.columns if col.startswith('ATA_')]
+        df_processed[ata_cols] = df_processed[ata_cols].fillna(0)
+
+        return df_processed, maint, ata_cols
+
     except FileNotFoundError as e:
         st.error(f"오류: '{e.filename}' 파일을 찾을 수 없습니다. CSV 파일들이 스크립트와 같은 폴더에 있는지 확인해주세요.")
         return None, None, None
 
+# --- 통합 모델 학습 (캐싱으로 동일 조건 재학습 방지) ---
+@st.cache_data
+def train_unified_model(df, target, numerical_features, categorical_features):
+    """
+    전체 데이터를 받아 통합 모델을 학습하고, 시계열 교차검증을 수행합니다.
+    target, features가 바뀔 때만 재학습됩니다.
+    """
+    # 1. 학습/테스트 기간 정의
+    train_start = pd.to_datetime("2023-06-01")
+    train_end = pd.to_datetime("2024-05-31")
+    df_train = df[(df['DATE'] >= train_start) & (df['DATE'] <= train_end)].copy()
+
+    X_train = df_train[numerical_features + categorical_features]
+    y_train = df_train[target]
+
+    # 2. 모델 파이프라인 구축
+    preprocessor = ColumnTransformer(
+        [
+            ('scaler_numerical', StandardScaler(), numerical_features),
+            ('onehot_categorical', OneHotEncoder(handle_unknown='ignore', sparse_output=False), categorical_features)
+        ],
+        remainder='drop'
+    )
+    pipeline = Pipeline([
+        ('preprocessor', preprocessor),
+        ('regressor', Lasso(alpha=0.01, max_iter=10000))
+    ])
+
+    # 3. 시계열 교차 검증 (TimeSeriesSplit)
+    tscv = TimeSeriesSplit(n_splits=5)
+    cv_scores = {'MAE': [], 'RMSE': [], 'R2': []}
+
+    for train_index, test_index in tscv.split(X_train):
+        X_train_fold, X_test_fold = X_train.iloc[train_index], X_train.iloc[test_index]
+        y_train_fold, y_test_fold = y_train.iloc[train_index], y_train.iloc[test_index]
         
-# --- 데이터 전처리 및 변수 생성 함수 (재사용을 위해 함수로 정의) ---
-def preprocess_df(df_input):
-    df_output = df_input.copy()
+        pipeline.fit(X_train_fold, y_train_fold)
+        preds = pipeline.predict(X_test_fold)
+        
+        cv_scores['MAE'].append(mean_absolute_error(y_test_fold, preds))
+        cv_scores['RMSE'].append(np.sqrt(mean_squared_error(y_test_fold, preds)))
+        cv_scores['R2'].append(r2_score(y_test_fold, preds))
 
-    if 'Date' in df_output.columns and not pd.api.types.is_datetime64_any_dtype(df_output['Date']):
-        df_output['Date'] = pd.to_datetime(df_output['Date'])
-    elif 'Date' not in df_output.columns:
-        raise KeyError("Error: 'Date' column not found in the dataframe. Please ensure your data has a 'Date' column.")
+    # 4. 최종 모델 학습 (전체 학습 데이터 사용)
+    pipeline.fit(X_train, y_train)
 
-    if 'REGNO' in df_output.columns:
-        df_output.rename(columns={'REGNO': 'HL_no'}, inplace=True)
-    elif 'HL_no' not in df_output.columns:
-        raise KeyError("Error: Neither 'REGNO' nor 'HL_no' column found for aircraft identification. One of them is required.")
-
-    if 'HL_no' in df_output.columns and 'Date' in df_output.columns:
-        df_output = df_output.sort_values(by=['HL_no', 'Date'])
-    else:
-        print("Warning: Cannot sort by 'HL_no' or 'Date' as one or both columns are missing.")
-
-# '정상' 데이터 마스크 함수
-def get_normal_data_mask(df, fault_df, maint_df, tail_num, window_days=7):
-    fault_dates = pd.to_datetime(fault_df[fault_df['AC_NO'] == tail_num]['NR_REQUEST_DATE'], errors='coerce').dropna()
-    maint_dates = pd.to_datetime(maint_df[maint_df['AC_NO'] == tail_num]['NR_REQUEST_DATE'], errors='coerce').dropna()
-    all_event_dates = pd.to_datetime(pd.concat([fault_dates, maint_dates]).unique(), errors='coerce').dropna()
-    
-    is_normal_data = pd.Series(True, index=df.index)
-    for event_date in all_event_dates:
-        start_exclusion = event_date - pd.Timedelta(days=window_days)
-        end_exclusion = event_date
-        is_normal_data &= ~((df['CREATION_DATE'] >= start_exclusion) & (df['CREATION_DATE'] <= end_exclusion))
-    return is_normal_data
+    return pipeline, cv_scores
 
 # --- 데이터 로드 ---
-df_data, too_high, maint = load_data()
+df_processed, maint, ata_cols = preprocess_data()
 
 # 데이터 로딩 성공 시에만 전체 앱 실행
-if df_data is not None:
+if df_processed is not None:
     # --- 사이드바 UI 구성 ---
-    st.sidebar.header('⚙️ 모델 파라미터 선택')
+    st.sidebar.header('분석 옵션 선택')
 
-    # 버튼, 멀티셀렉트, 드롭다운 메뉴 등 사이드바 UI 요소를 남색 테마로 변경
-    st.markdown("""
-    <style>
-    /* 분석 시작 버튼 */
-    div.stButton > button:first-child {
-        background-color: #000080; /* 남색 */
-        color: white;
-        border: none;
-    }
-    div.stButton > button:hover {
-        background-color: #4682B4; /* 마우스 올렸을 때 밝은 남색 */
-        color: white;
-        border: none;
-    }
-
-    /* 피처 선택(멀티셀렉트)의 선택된 항목 */
-    span[data-baseweb="tag"] {
-        background-color: #000080 !important;
-    }
-
-    /* 드롭다운 메뉴에 마우스를 올렸을 때 */
-    li[data-baseweb="menu-item-wrapper"]:hover {
-        background-color: #4682B4;
-    }
-    </style>""", unsafe_allow_html=True)
-
-    all_features = ['N3EGTA', 'N3GLA', 'N3WB', 'N3PT', 'N3P2A', 'N3LCOT', 'N3LCIT', 'N3IGV', 'N3SCV', 'N3HOT', 'N3LOT']
-    all_targets =  ['N3EGTA', 'N3GLA', 'N3WB', 'N3PT', 'N3P2A', 'N3LCOT', 'N3LCIT', 'N3IGV', 'N3SCV', 'N3HOT', 'N3LOT']
-    available_tails = sorted(df_data['REGNO'].unique().astype(str))
-
-    selected_tail = st.sidebar.selectbox('1. 항공기 기번 선택:', available_tails, index=available_tails.index('HL8001'))
-    selected_target = st.sidebar.selectbox('2. 예측 타겟 변수 선택:', all_targets)
+    # 1. 분석할 항공기 선택
+    available_tails = sorted(df_processed['AC_NO'].unique().astype(str))
+    selected_tail = st.sidebar.selectbox('1. 분석할 항공기 선택:', available_tails, index=available_tails.index('HL8001'))
     
-    # 타겟으로 선택된 변수는 피처 목록에서 자동 제외
-    available_features = [f for f in all_features if f != selected_target]
-    selected_features = st.sidebar.multiselect('3. 학습 피처 변수 선택:', available_features, default=available_features)
+    # 2. 머신러닝 및 Raw 데이터 시각화 체크박스
+    run_ml_prediction = st.sidebar.checkbox('머신러닝 예측 실행', value=True)
+    visualize_raw_data = st.sidebar.checkbox('Raw 데이터 시각화', value=True)
+
+    # 머신러닝 선택 시 관련 옵션 표시
+    if run_ml_prediction:
+        st.sidebar.markdown("---")
+        st.sidebar.header('머신러닝 예측 설정')
+        base_features = ['EGTA', 'GLA', 'WB', 'PT', 'P2A', 'LCOT', 'LCIT', 'IGV', 'SCV', 'HOT', 'LOT']
+        selected_target = st.sidebar.selectbox('예측 타겟 변수 선택:', base_features, index=len(base_features)-1)
+        available_features_for_ui = [f for f in base_features if f != selected_target]
+        selected_base_features = st.sidebar.multiselect('학습 피처 선택:',
+                                                     available_features_for_ui,
+                                                     default=available_features_for_ui)
+
+    # Raw 데이터 시각화 선택 시 관련 옵션 표시
+    if visualize_raw_data:
+        st.sidebar.markdown("---")
+        st.sidebar.header('Raw 데이터 시각화 설정')
+        base_features = ['EGTA', 'GLA', 'WB', 'PT', 'P2A', 'LCOT', 'LCIT', 'IGV', 'SCV', 'HOT', 'LOT']
+        selected_raw_features = st.sidebar.multiselect(
+            '시각화할 피처 선택:',
+            base_features,
+            default=['HOT', 'LCOT']
+        )
 
     # --- 분석 시작 버튼 ---
-    if st.sidebar.button('📊 분석 시작', type="primary"):
-        with st.spinner('모델 학습 및 시각화 진행 중...'):
+    if st.sidebar.button('분석 시작', type="primary") or 'analysis_done' in st.session_state:
+        st.session_state['analysis_done'] = True
+        
+        if not run_ml_prediction and not visualize_raw_data:
+            st.info("실행할 분석 옵션을 하나 이상 선택해주세요.")
             
-            # --- 원본 코드의 핵심 로직 시작 ---
+        # --- 1. Raw 데이터 시각화 모드 ---
+        if visualize_raw_data:
+            st.subheader(f"📊 {selected_tail} - Raw 데이터 시각화")
             
-            # 1. 사용자가 선택한 값으로 변수 설정
-            tail = selected_tail
-            features = selected_features
-            target = selected_target
-
-            # 2. 데이터 분리
-            train_end_date = pd.to_datetime('2024-12-31')
-            df_train = df_data[df_data['CREATION_DATE'] <= train_end_date].copy()
-            df_test = df_data[df_data['CREATION_DATE'] > train_end_date].copy()
-
-            df_train_tail = df_train[df_train['REGNO'] == tail].copy().sort_values(by='CREATION_DATE')
-            df_test_tail = df_test[df_test['REGNO'] == tail].copy().sort_values(by='CREATION_DATE')
-
-            if len(df_train_tail) < 30:
-                st.warning(f"항공기 {tail}의 학습 데이터가 부족하여 분석을 중단합니다.")
+            df_raw_plot = df_processed[df_processed['AC_NO'] == selected_tail].copy()
+            
+            if df_raw_plot.empty:
+                st.warning(f"선택된 항공기({selected_tail})에 대한 데이터가 없습니다.")
+            elif not selected_raw_features:
+                st.warning("시각화할 피처를 하나 이상 선택해주세요.")
             else:
-                st.success(f"항공기: {tail} 분석을 시작합니다.")
+                fig_raw = go.Figure()
+                for feature in selected_raw_features:
+                    fig_raw.add_trace(go.Scatter(
+                        x=df_raw_plot['DATE'],
+                        y=df_raw_plot[feature],
+                        mode='lines',
+                        name=feature,
+                        line={'width': 2},
+                        hovertemplate='값: %{y:.2f}'
+                    ))
                 
-                # 3. 모델 학습
-                normal_mask = get_normal_data_mask(df_train_tail, too_high, maint, tail, window_days=7)
-                X_train_full = df_train_tail[features]
-                y_train_full = df_train_tail[target]
-                X_train_normal = X_train_full[normal_mask]
-                y_train_normal = y_train_full[normal_mask]
+                fig_raw.update_layout(
+                    title=f'{selected_tail} - {", ".join(selected_raw_features)} 데이터 추이',
+                    xaxis_title='날짜',
+                    yaxis_title='값',
+                    hovermode="x unified",
+                    xaxis={'dtick': 'M3', 'tickformat': '%Y-%m-%d'}
+                )
+                st.plotly_chart(fig_raw, use_container_width=True)
+
+                st.write(f"📈 {selected_tail}의 {', '.join(selected_raw_features)} 전체 기간 데이터")
                 
-                if len(X_train_normal) < 30:
-                    st.warning("정비/고장 이력 제외 후 학습 데이터가 부족합니다.")
+                display_cols = ['DATE'] + selected_raw_features
+                st.dataframe(df_raw_plot[display_cols], height=240, use_container_width=True)
+        
+            st.markdown("---")
+
+        # --- 2. 머신러닝 모드 ---
+        if run_ml_prediction:
+            with st.spinner('통합 모델 학습 및 결과 분석 중...'):
+                
+                feature_names_dict = {
+                    'EGTA': 'APU 배기 가스 온도', 'GLA': 'APU 발전기 부하',
+                    'WB': '보정된 부하 압축기 공기 공급량', 'PT': '블리드 공기 압력',
+                    'P2A': 'APU 흡입 압력', 'LCOT': '부하 압축기 출구 온도',
+                    'LCIT': '부하 압축기 입구 온도', 'IGV': '흡입 공기 조절깃 위치',
+                    'SCV': '압력 조절 밸브 위치', 'HOT': 'High Oil Temperature',
+                    'LOT': 'Low Oil Temperature',
+                }
+
+                time_features = ['hour', 'month_sin', 'month_cos', 'dayofweek']
+                selected_features = selected_base_features + time_features
+                numerical_features = [f for f in selected_features if f in feature_names_dict or f in time_features]
+                categorical_features = ata_cols
+                all_model_features = numerical_features + categorical_features
+
+                trained_pipeline, cv_scores = train_unified_model(df_processed, selected_target, numerical_features, categorical_features)
+                
+                df_processed['Predicted'] = trained_pipeline.predict(df_processed[all_model_features])
+                df_processed['Residual'] = df_processed[selected_target] - df_processed['Predicted']
+                df_tail_analysis = df_processed[df_processed['AC_NO'] == selected_tail].copy()
+                
+                df_plot = df_tail_analysis
+
+                # --- 선택한 항공기 예측 및 분석 (전체 기간) ---
+                st.subheader(f"1. {selected_tail} - {selected_target} 예측 분석 (전체 기간)")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    show_outliers_on_plot = st.checkbox("예측 이상치 표시", value=False)
+                with col2:
+                    show_model_details = st.checkbox("모델 관련 세부사항", value=False)
+                st.caption("모델이 자동으로 분류한 이상치를 붉은색 'X'로 표시합니다.")
+
+                if df_plot.empty:
+                    st.warning(f"{selected_tail}에 대한 데이터가 없습니다.")
                 else:
-                    preprocessor = ColumnTransformer([('scaler', StandardScaler(), features)], remainder='drop')
-                    pipeline = Pipeline([('preprocessor', preprocessor), ('regressor', Lasso(max_iter=10000))])
-                    tscv = TimeSeriesSplit(n_splits=5)
-                    param_grid = {'regressor__alpha': [0.001, 0.01, 0.1, 1, 10]}
-                    search = GridSearchCV(pipeline, param_grid=param_grid, cv=tscv, scoring='neg_mean_absolute_error', n_jobs=-1)
-                    search.fit(X_train_normal, y_train_normal)
-                    best_model = search.best_estimator_
+                    model = IsolationForest(contamination=0.01, random_state=42)
+                    model.fit(df_plot[[selected_target, 'Predicted']])
+                    df_plot['outlier'] = model.fit_predict(df_plot[[selected_target, 'Predicted']])
+                    outliers_df = df_plot[df_plot['outlier'] == -1].copy()
 
-                    st.write(f"**모델 학습 완료!** (최적 Alpha: `{search.best_params_['regressor__alpha']}`)")
-
-                    # 4. 예측 및 잔차 계산
-                    df_train_tail['Predicted'] = best_model.predict(X_train_full)
-                    df_train_tail['Residual'] = df_train_tail[target] - df_train_tail['Predicted']
-
-                    # 5. 학습 기간 시각화 및 정비 기록 출력
-                    st.markdown("---")
-                    st.subheader('1. 학습 기간(Training Period) 분석')
-
-                    # 학습 기간 정비 기록 처리
-                    maint_records_train_period = maint[(maint['AC_NO'] == tail) & (maint['NR_REQUEST_DATE'] >= df_train_tail['CREATION_DATE'].min()) & (maint['NR_REQUEST_DATE'] <= df_train_tail['CREATION_DATE'].max())].copy()
-                    fault_dates_train = too_high[(too_high['AC_NO'] == tail) & (too_high['NR_REQUEST_DATE'] >= df_train_tail['CREATION_DATE'].min()) & (too_high['NR_REQUEST_DATE'] <= df_train_tail['CREATION_DATE'].max())]['NR_REQUEST_DATE'].dropna()
-
-                    # 시각화 1: 학습 기간
-                    fig1, axes1 = plt.subplots(2, 1, figsize=(15, 10), sharex=True)
-                    sns.lineplot(x='CREATION_DATE', y=target, data=df_train_tail, label=f'Actual {target}', color='blue', ax=axes1[0], marker='o', markersize=3)
-                    sns.lineplot(x='CREATION_DATE', y='Predicted', data=df_train_tail, label=f'Predicted {target}', color='red', linestyle='--', ax=axes1[0])
-                    for i, date in enumerate(fault_dates_train):
-                        axes1[0].axvline(x=date, color='black', linestyle='-', linewidth=1.5, label='High Temp Fault' if i == 0 else "")
+                    fig, axes = plt.subplots(2, 1, figsize=(15, 10), sharex=True)
                     
-                    # (코드 중략) 원본과 동일한 정비 기록 시각화 로직
-                    plotted_maint_labels_train = {'Maint. Record': False, 'Special Maint.': False}
-                    for date in maint_records_train_period['NR_REQUEST_DATE'].dropna().unique():
-                        daily_maint_data = maint_records_train_period[maint_records_train_period['NR_REQUEST_DATE'] == date]
-                        malfunction_text = " ".join(daily_maint_data['MALFUNCTION'].dropna().astype(str).str.upper())
-                        action_text = " ".join(daily_maint_data['CORRECTIVE_ACTION'].dropna().astype(str).str.upper())
-                        line_color, line_label = ('orange', 'Maint. Record')
-                        if 'ODOR' in malfunction_text or 'CLEAN' in action_text:
-                            line_color, line_label = ('green', 'Special Maint.')
-                        if not plotted_maint_labels_train[line_label]:
-                            axes1[0].axvline(x=date, color=line_color, linestyle='-', linewidth=1.5, label=line_label)
-                            plotted_maint_labels_train[line_label] = True
-                        else:
-                            axes1[0].axvline(x=date, color=line_color, linestyle='-', linewidth=1.5)
+                    maint_dates = maint[maint['AC_NO'] == selected_tail]['NR_REQUEST_DATE'].dropna()
                     
-                    axes1[0].set_title(f'{target}: Actual vs. Prediction (Aircraft: {tail}, Training Period)'); axes1[0].set_ylabel(f'{target} Value'); axes1[0].grid(True)
-                    handles, labels = axes1[0].get_legend_handles_labels()
-                    axes1[0].legend(dict(zip(labels, handles)).values(), dict(zip(labels, handles)).keys())
-                    axes1[1].fill_between(df_train_tail['CREATION_DATE'], df_train_tail['Residual'], 0, where=(df_train_tail['Residual'] > 0), color='red', alpha=0.3, label='Positive Residual (Model Under-predicts)')
-                    axes1[1].fill_between(df_train_tail['CREATION_DATE'], df_train_tail['Residual'], 0, where=(df_train_tail['Residual'] < 0), color='blue', alpha=0.3, label='Negative Residual (Model Over-predicts)')
-                    axes1[1].axhline(y=0, color='gray', linestyle='--'); axes1[1].set_title(f'Residuals of {target} Prediction'); axes1[1].set_xlabel('Date'); axes1[1].set_ylabel('Residual Value'); axes1[1].legend(); axes1[1].grid(True)
+                    sns.lineplot(x='DATE', y=selected_target, data=df_plot, label=f'실제 {selected_target}', color='blue', ax=axes[0], marker='o', markersize=3, alpha=0.7)
+                    sns.lineplot(x='DATE', y='Predicted', data=df_plot, label=f'예측 {selected_target}', color='red', linestyle='--', ax=axes[0])
+                    
+                    if show_outliers_on_plot and not outliers_df.empty:
+                        axes[0].scatter(x=outliers_df['DATE'], y=outliers_df[selected_target], color='red', s=100, marker='X', label='Isolation Forest 이상치', zorder=5)
+
+                    for i, date in enumerate(maint_dates.unique()):
+                        axes[0].axvline(x=date, color='gold', linestyle='-', linewidth=4, label='정비 기록' if i == 0 else "")
+                    axes[0].set_title(f'{selected_tail} - {selected_target} 예측값 분석 (전체 기간)', fontsize=16)
+                    axes[0].set_ylabel(f'{selected_target} 값')
+                    axes[0].grid(True, linestyle='--', alpha=0.6)
+                    axes[0].legend()
+
+                    max_abs_residual = df_plot['Residual'].abs().max()
+                    y_limit = max(20, max_abs_residual + 5)
+                    axes[1].fill_between(df_plot['DATE'], df_plot['Residual'], 0, where=(df_plot['Residual'] > 0), color='red', alpha=0.3, label='과소 예측 (실제값 > 예측값)')
+                    axes[1].fill_between(df_plot['DATE'], df_plot['Residual'], 0, where=(df_plot['Residual'] < 0), color='blue', alpha=0.3, label='과대 예측 (실제값 < 예측값)')
+                    axes[1].axhline(y=0, color='gray', linestyle='--')
+                    axes[1].set_ylim(-y_limit, y_limit)
+                    
+                    if show_outliers_on_plot and not outliers_df.empty:
+                        axes[1].scatter(x=outliers_df['DATE'], y=outliers_df['Residual'], color='red', s=100, marker='X', label='Isolation Forest 이상치', zorder=5)
+
+                    for i, date in enumerate(maint_dates.unique()):
+                        axes[1].axvline(x=date, color='gold', linestyle='-', linewidth=4, label='정비 기록' if i == 0 else "")
+
+                    axes[1].set_title('예측 잔차 (Residuals)', fontsize=16)
+                    axes[1].set_xlabel('날짜')
+                    axes[1].set_ylabel('잔차 값')
+                    axes[1].grid(True, linestyle='--', alpha=0.6)
+                    axes[1].legend()
+
                     plt.tight_layout()
-                    st.pyplot(fig1)
+                    st.pyplot(fig)
 
-                    # 학습 기간 정비 기록 테이블 출력
-                    st.write("#### 학습 기간 정비 기록")
-                    if not maint_records_train_period.empty:
-                        maint_records_train_period['DATE_STR'] = maint_records_train_period['NR_REQUEST_DATE'].dt.strftime('%Y-%m-%d')
-                        grouped_maint = maint_records_train_period.groupby('DATE_STR').agg({'MALFUNCTION': lambda x: '; '.join(x.dropna().astype(str).unique()), 'CORRECTIVE_ACTION': lambda x: '; '.join(x.dropna().astype(str).unique())}).reset_index()
-                        st.dataframe(grouped_maint)
-                    else:
-                        st.info("해당 기간에 정비 기록이 없습니다.")
-
-                    # 6. 예측 기간 분석
-                    if not df_test_tail.empty:
+                # 이상치 목록 출력 (체크박스가 True일 때만 실행)
+                if show_outliers_on_plot:
+                    if not outliers_df.empty:
                         st.markdown("---")
-                        st.subheader('2. 예측 기간(Test Period) 분석')
-                        
-                        df_test_tail['Predicted'] = best_model.predict(df_test_tail[features])
-                        df_test_tail['Residual'] = df_test_tail[target] - df_test_tail['Predicted']
-
-                        maint_records_test_period = maint[(maint['AC_NO'] == tail) & (maint['NR_REQUEST_DATE'] >= df_test_tail['CREATION_DATE'].min()) & (maint['NR_REQUEST_DATE'] <= df_test_tail['CREATION_DATE'].max())].copy()
-                        fault_dates_test = too_high[(too_high['AC_NO'] == tail) & (too_high['NR_REQUEST_DATE'] >= df_test_tail['CREATION_DATE'].min()) & (too_high['NR_REQUEST_DATE'] <= df_test_tail['CREATION_DATE'].max())]['NR_REQUEST_DATE'].dropna()
-
-                        # 시각화 2: 예측 기간
-                        fig2, axes2 = plt.subplots(2, 1, figsize=(15, 10), sharex=True)
-                        sns.lineplot(x='CREATION_DATE', y=target, data=df_test_tail, label=f'Actual {target}', color='blue', ax=axes2[0], marker='o', markersize=3)
-                        sns.lineplot(x='CREATION_DATE', y='Predicted', data=df_test_tail, label=f'Predicted {target}', color='red', linestyle='--', ax=axes2[0])
-                        # (코드 중략) 원본과 동일한 정비 기록 시각화 로직 ..
-                        for i, date in enumerate(fault_dates_test):
-                            axes2[0].axvline(x=date, color='black', linestyle='-', linewidth=1.5, label='High Temp Fault' if i == 0 else "")
-                        
-                        plotted_maint_labels_test = {'Maint. Record': False, 'Special Maint.': False}
-                        for date in maint_records_test_period['NR_REQUEST_DATE'].dropna().unique():
-                            daily_maint_data = maint_records_test_period[maint_records_test_period['NR_REQUEST_DATE'] == date]
-                            malfunction_text = " ".join(daily_maint_data['MALFUNCTION'].dropna().astype(str).str.upper())
-                            action_text = " ".join(daily_maint_data['CORRECTIVE_ACTION'].dropna().astype(str).str.upper())
-                            line_color, line_label = ('orange', 'Maint. Record')
-                            if 'ODOR' in malfunction_text or 'CLEAN' in action_text:
-                                line_color, line_label = ('green', 'Special Maint.')
-                            if not plotted_maint_labels_test[line_label]:
-                                axes2[0].axvline(x=date, color=line_color, linestyle='-', linewidth=1.5, label=line_label)
-                                plotted_maint_labels_test[line_label] = True
-                            else:
-                                axes2[0].axvline(x=date, color=line_color, linestyle='-', linewidth=1.5)
-
-                        axes2[0].set_title(f'{target}: Actual vs. Prediction (Aircraft: {tail}, Prediction Period)'); axes2[0].set_ylabel(f'{target} Value'); axes2[0].grid(True)
-                        handles, labels = axes2[0].get_legend_handles_labels()
-                        axes2[0].legend(dict(zip(labels, handles)).values(), dict(zip(labels, handles)).keys())
-                        axes2[1].fill_between(df_test_tail['CREATION_DATE'], df_test_tail['Residual'], 0, where=(df_test_tail['Residual'] > 0), color='red', alpha=0.3, label='Positive Residual')
-                        axes2[1].fill_between(df_test_tail['CREATION_DATE'], df_test_tail['Residual'], 0, where=(df_test_tail['Residual'] < 0), color='blue', alpha=0.3, label='Negative Residual')
-                        axes2[1].axhline(y=0, color='gray', linestyle='--'); axes2[1].set_title(f'Residuals of {target} Prediction'); axes2[1].set_xlabel('Date'); axes2[1].set_ylabel('Residual Value'); axes2[1].legend(); axes2[1].grid(True)
-                        plt.tight_layout()
-                        st.pyplot(fig2)
-
-                        # 예측 기간 정비 기록 테이블 출력
-                        st.write("#### 예측 기간 정비 기록")
-                        if not maint_records_test_period.empty:
-                            maint_records_test_period['DATE_STR'] = maint_records_test_period['NR_REQUEST_DATE'].dt.strftime('%Y-%m-%d')
-                            grouped_maint_test = maint_records_test_period.groupby('DATE_STR').agg({'MALFUNCTION': lambda x: '; '.join(x.dropna().astype(str).unique()), 'CORRECTIVE_ACTION': lambda x: '; '.join(x.dropna().astype(str).unique())}).reset_index()
-                            st.dataframe(grouped_maint_test)
-                        else:
-                            st.info("해당 기간에 정비 기록이 없습니다.")
+                        st.subheader(f"2. Isolation Forest로 감지된 이상치 목록 ({selected_tail})")
+                        display_outliers = outliers_df[['DATE', selected_target, 'Predicted', 'Residual']].copy()
+                        display_outliers['DATE_STR'] = display_outliers['DATE'].dt.strftime('%Y-%m-%d %H:%M:%S')
+                        display_outliers.rename(columns={'DATE_STR': '날짜', selected_target: '실제값', 'Predicted': '예측값', 'Residual': '잔차'}, inplace=True)
+                        display_outliers.index = np.arange(1, len(display_outliers) + 1)
+                        st.dataframe(display_outliers[['날짜', '실제값', '예측값', '잔차']], height=240)
                     else:
-                        st.info("해당 항공기는 예측 기간 데이터가 없습니다.")
+                        st.info("Isolation Forest 분석 결과, 이상치가 감지되지 않았습니다.")
+
+                st.markdown("---")
+                st.markdown(f"##### {selected_tail} 정비 기록 (전체 기간)")
+                maint_records = maint[maint['AC_NO'] == selected_tail].copy()
+                if not maint_records.empty:
+                    maint_records['DATE_STR'] = maint_records['NR_REQUEST_DATE'].dt.strftime('%Y-%m-%d')
+                    display_df = maint_records[['DATE_STR', 'MALFUNCTION', 'MALFUNCTION_ATA', 'CORRECTIVE_ACTION']].sort_values(by='DATE_STR', ascending=True)
+                    display_df.index = np.arange(1, len(display_df) + 1)
+                    st.dataframe(display_df)
+                else:
+                    st.info("해당 기간에 정비 기록이 없습니다.")
+                
+                # --- 모델 관련 세부사항 섹션 (체크박스에 따라 표시) ---
+                if show_model_details:
+                    st.markdown("---")
+                    st.subheader("모델 관련 세부사항")
+                    
+                    # 예측 이상치 표시 여부에 따라 제목 번호 동적 할당
+                    if show_outliers_on_plot:
+                        section_3_title = "3. 통합 모델 학습 및 검증"
+                        section_4_title = "4. 학습에 사용된 피처 중요도 분석"
+                    else:
+                        section_3_title = "2. 통합 모델 학습 및 검증"
+                        section_4_title = "3. 학습에 사용된 피처 중요도 분석"
+                    
+                    model_col1, model_col2 = st.columns(2)
+                    
+                    with model_col1:
+                        # --- 모델 학습 및 교차검증 ---
+                        st.subheader(section_3_title)
+                        st.write("시계열 교차검증(TimeSeriesSplit, n=5) 평균 성능:")
+                        st.metric("R² Score", f"{np.mean(cv_scores['R2']):.3f}")
+                        st.markdown("R² 점수는 **1에 가까울수록** 모델이 데이터를 잘 설명한다는 의미입니다.")
+                    
+                    with model_col2:
+                        # --- 학습에 사용된 피처 중요도 분석 ---
+                        st.subheader(section_4_title)
+                        
+                        numerical_feature_names = numerical_features
+                        onehot_encoder = trained_pipeline.named_steps['preprocessor'].named_transformers_['onehot_categorical']
+                        categorical_feature_names = list(onehot_encoder.get_feature_names_out(categorical_features))
+                        
+                        # 피처 이름에 한국어 설명을 추가
+                        def get_korean_name(feature):
+                            if feature in feature_names_dict:
+                                return f'{feature} ({feature_names_dict[feature]})'
+                            elif feature.startswith('ATA_'):
+                                return f'{feature} (정비 코드)'
+                            else:
+                                return feature
+                        
+                        all_feature_names = [get_korean_name(f) for f in numerical_feature_names] + [get_korean_name(f) for f in categorical_feature_names]
+                        
+                        coefficients = trained_pipeline.named_steps['regressor'].coef_
+                        
+                        feature_importance_df = pd.DataFrame({
+                            'Feature': all_feature_names,
+                            'Coefficient': coefficients
+                        })
+                        
+                        feature_importance_df = feature_importance_df[feature_importance_df['Coefficient'] != 0].copy()
+                        feature_importance_df['Abs_Coefficient'] = feature_importance_df['Coefficient'].abs()
+                        feature_importance_df = feature_importance_df.sort_values(by='Abs_Coefficient', ascending=False)
+                        
+                        if not feature_importance_df.empty:
+                            fig_importance, ax = plt.subplots(figsize=(5, len(feature_importance_df) * 0.5))
+                            heatmap_data = feature_importance_df[['Coefficient']].set_index(feature_importance_df['Feature'])
+                            
+                            sns.heatmap(
+                                heatmap_data, 
+                                annot=True, 
+                                fmt=".2f", 
+                                cmap='coolwarm', 
+                                center=0,
+                                cbar_kws={'label': '회귀 계수'},
+                                ax=ax
+                            )
+                            ax.set_ylabel('')
+                            ax.set_xlabel('회귀 계수')
+                            ax.set_title(f'통합 모델 피처 중요도', fontsize=16)
+                            plt.yticks(rotation=0)
+                            plt.tight_layout()
+                            st.pyplot(fig_importance)
+                            
+                            st.markdown(f"""
+                            **회귀 계수 해석:**
+                            - **양수(+)** 계수: 피처 값이 증가할수록 타겟 변수($$ {selected_target} $$) 값도 증가하는 경향이 있습니다. (정비례)
+                            - **음수(-)** 계수: 피처 값이 증가할수록 타겟 변수($$ {selected_target} $$) 값은 감소하는 경향이 있습니다. (반비례)
+                            - **절댓값**이 클수록 모델의 예측에 미치는 영향이 크다는 것을 의미합니다.
+                            """)
+                        else:
+                            st.info("Lasso 모델의 페널티 설정으로 인해 모든 피처의 계수가 0이 되었습니다.")
 
