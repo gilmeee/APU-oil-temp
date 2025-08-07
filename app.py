@@ -17,7 +17,6 @@ import base64
 import os
 import matplotlib.font_manager as fm
 
-
 # --- 기본 설정 ---
 warnings.filterwarnings('ignore')
 st.set_page_config(layout="wide", page_title="APU 결함 예측 및 데이터 분석 대시보드")
@@ -37,9 +36,6 @@ def encode_font(font_path):
 regular_font_encoded = encode_font("HanjinGroupSans.ttf")
 bold_font_encoded = encode_font("HanjinGroupSansBold.ttf")
 
-
-# --- CSS 스타일 ---
-# 폰트 인코딩이 성공했을 경우에만 CSS를 적용합니다.
 # --- CSS 스타일 ---
 # 폰트 인코딩이 성공했을 경우에만 CSS를 적용합니다.
 if regular_font_encoded and bold_font_encoded:
@@ -129,7 +125,7 @@ plt.rcParams['axes.unicode_minus'] = False
 
 # --- 타이틀 ---
 st.title('APU 결함 예측 및 데이터 분석 대시보드')
-st.caption('모든 항공기 데이터를 학습한 단일 통합 모델을 사용하여 특정 항공기의 상태를 예측하고 분석합니다.')
+st.caption('모든 항공기 데이터를 학습한 단일 통합 모델을 사용하여 특정 항공기의 상태를 예측하고 분석합니다.') #made with 한진 폰트
 
 # --- 데이터 로딩 및 전처리 (캐싱으로 속도 극대화) ---
 @st.cache_data
@@ -279,7 +275,7 @@ if df_processed is not None:
         selected_raw_features = st.sidebar.multiselect(
             '시각화할 피처 선택:',
             base_features,
-            default=['HOT', 'LCOT']
+            default=['LOT','HOT', 'LCIT']
         )
 
     # --- 분석 시작 버튼 ---
@@ -362,7 +358,7 @@ if df_processed is not None:
                     show_outliers_on_plot = st.checkbox("예측 이상치 표시", value=False)
                 with col2:
                     show_model_details = st.checkbox("모델 관련 세부사항", value=False)
-                st.caption("모델이 자동으로 분류한 이상치를 붉은색 'X'로 표시합니다.")
+                st.caption("모델이 자동으로 감지한 이상치를 붉은색 'X'로 표시합니다.")
 
                 if df_plot.empty:
                     st.warning(f"{selected_tail}에 대한 데이터가 없습니다.")
@@ -415,7 +411,7 @@ if df_processed is not None:
                 if show_outliers_on_plot:
                     if not outliers_df.empty:
                         st.markdown("---")
-                        st.subheader(f"2. Isolation Forest로 감지된 이상치 목록 ({selected_tail})")
+                        st.subheader(f"2. 자동으로 감지된 이상치 목록 ({selected_tail})")
                         display_outliers = outliers_df[['DATE', selected_target, 'Predicted', 'Residual']].copy()
                         display_outliers['DATE_STR'] = display_outliers['DATE'].dt.strftime('%Y-%m-%d %H:%M:%S')
                         display_outliers.rename(columns={'DATE_STR': '날짜', selected_target: '실제값', 'Predicted': '예측값', 'Residual': '잔차'}, inplace=True)
