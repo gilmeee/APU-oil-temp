@@ -30,7 +30,39 @@ def encode_font(font_path):
         return None
     with open(font_path, 'rb') as f:
         return base64.b64encode(f.read()).decode('utf-8')
+        
+def set_matplotlib_korean_font():
+    # 1) 프로젝트에 포함된 폰트 우선 사용
+    candidates = [
+        "HanjinGroupSans.ttf",        # 보통체
+        "HanjinGroupSansBold.ttf",    # 굵은체 (없으면 보통체만 써도 됨)
+        # 2) 환경에 있을 수도 있는 폰트들 (있으면 자동 사용)
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/System/Library/Fonts/AppleGothic.ttf",   # mac
+        "C:/Windows/Fonts/malgun.ttf",             # windows
+    ]
 
+    chosen_name = None
+    for path in candidates:
+        if os.path.exists(path):
+            try:
+                fm.fontManager.addfont(path)
+                chosen_name = fm.FontProperties(fname=path).get_name()
+                break
+            except Exception:
+                pass
+
+    # 최후의 보루: 그래도 못 찾으면 DejaVu Sans (한글은 깨질 수 있음)
+    if not chosen_name:
+        chosen_name = "DejaVu Sans"
+
+    plt.rcParams["font.family"] = chosen_name
+    plt.rcParams["axes.unicode_minus"] = False
+    return chosen_name
+
+_used = set_matplotlib_korean_font()
+# st.caption(f"matplotlib font → {_used}")  # 필요시 디버그용
 # --- 폰트 인코딩 실행 ---
 # 일반 글씨체와 굵은 글씨체를 각각 불러옵니다.
 regular_font_encoded = encode_font("HanjinGroupSans.ttf")
