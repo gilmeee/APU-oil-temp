@@ -32,24 +32,41 @@ def encode_font(font_path: str):
 
 
 # --- Matplotlib 한글 폰트 설정 (그래프 전용) ---
-def set_matplotlib_korean_font():
-    # 1) 로컬에 둔 Hanjin 폰트가 있으면 최우선 사용
-    for p in ["HanjinGroupSans.ttf", "HanjinGroupSansBold.ttf"]:
+def set_korean_font():
+    candidates = [
+        # Windows
+        r"C:\Windows\Fonts\NanumGothic.ttf",
+        r"C:\Windows\Fonts\NanumGothicLight.ttf",
+        r"C:\Windows\Fonts\NanumGothicBold.ttf",
+        # macOS
+        "/Library/Fonts/NanumGothic.ttf",
+        "/System/Library/Fonts/AppleGothic.ttf",
+        # Linux (배포 환경 등)
+        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    ]
+
+    chosen = None
+    for p in candidates:
         if os.path.exists(p):
             try:
                 fm.fontManager.addfont(p)
-                name = fm.FontProperties(fname=p).get_name()
-                plt.rcParams["font.family"] = name
+                chosen = fm.FontProperties(fname=p).get_name()
                 break
             except Exception:
                 pass
-    else:
-        # 2) 없으면 matplotlib 내장 폰트로 안전하게
-        plt.rcParams["font.family"] = "DejaVu Sans"
 
-    # 음수 부호 깨짐 방지
+    if not chosen:
+        chosen = "DejaVu Sans"   # matplotlib 내장 폰트(한글 지원)
+
+    plt.rcParams["font.family"] = chosen
     plt.rcParams["axes.unicode_minus"] = False
-    return plt.rcParams["font.family"]
+    return chosen
+
+# 호출 한 줄
+_applied = set_korean_font()
+# (선택) Streamlit이면 확인용
+# st.caption(f"matplotlib font → {_applied}")
 
 
 # (선택) 디버그: 실제 적용된 폰트명 확인하고 싶으면 다음 줄 주석 해제
