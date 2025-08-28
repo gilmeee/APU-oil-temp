@@ -71,7 +71,6 @@ _applied = set_korean_font()
 
 # (선택) 디버그: 실제 적용된 폰트명 확인하고 싶으면 다음 줄 주석 해제
 # st.caption(f"matplotlib font → {set_matplotlib_korean_font()}")
-set_matplotlib_korean_font()
 # --- 폰트 인코딩 실행 ---
 # 일반 글씨체와 굵은 글씨체를 각각 불러옵니다.
 regular_font_encoded = encode_font("HanjinGroupSans.ttf")
