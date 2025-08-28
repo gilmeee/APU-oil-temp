@@ -119,7 +119,7 @@ if regular_font_encoded and bold_font_encoded:
 
 # --- Matplotlib 한글 폰트 설정 ---
 # 그래프의 한글은 안정적인 '맑은 고딕'을 사용하도록 직접 지정합니다.
-plt.rcParams['font.family'] = 'Malgun Gothic'
+plt.rcParams['font.family'] = 'NanumGothic'
 plt.rcParams['axes.unicode_minus'] = False
 # ----------------------------------
 
