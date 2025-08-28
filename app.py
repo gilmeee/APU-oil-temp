@@ -172,7 +172,7 @@ def preprocess_data():
 
         maint_ata_pivot = maint_for_merge.pivot_table(
             index=['AC_NO', 'DATE'],
-            columns='MALFUNCTION',
+            columns='MALFUNCTION', 
             aggfunc=lambda x: 1,
             fill_value=0
         ).reset_index()
@@ -253,8 +253,8 @@ if df_processed is not None:
     selected_tail = st.sidebar.selectbox('1. 분석할 항공기 선택:', available_tails, index=available_tails.index('HL8001'))
     
     # 2. 머신러닝 및 Raw 데이터 시각화 체크박스
-    run_ml_prediction = st.sidebar.checkbox('머신러닝 예측 실행', value=True)
-    visualize_raw_data = st.sidebar.checkbox('Raw 데이터 시각화', value=True)
+    run_ml_prediction = st.sidebar.checkbox('머신러닝 예측 실행', value=False)
+    visualize_raw_data = st.sidebar.checkbox('Raw 데이터 시각화', value=False)
 
     # 머신러닝 선택 시 관련 옵션 표시
     if run_ml_prediction:
@@ -264,8 +264,8 @@ if df_processed is not None:
         selected_target = st.sidebar.selectbox('예측 타겟 변수 선택:', base_features, index=len(base_features)-1)
         available_features_for_ui = [f for f in base_features if f != selected_target]
         selected_base_features = st.sidebar.multiselect('학습 피처 선택:',
-                                                     available_features_for_ui,
-                                                     default=available_features_for_ui)
+                                                        available_features_for_ui,
+                                                        default=available_features_for_ui)
 
     # Raw 데이터 시각화 선택 시 관련 옵션 표시
     if visualize_raw_data:
@@ -275,7 +275,7 @@ if df_processed is not None:
         selected_raw_features = st.sidebar.multiselect(
             '시각화할 피처 선택:',
             base_features,
-            default=['LOT','HOT', 'LCIT']
+            default=['LOT','HOT']
         )
 
     # --- 분석 시작 버튼 ---
@@ -351,15 +351,15 @@ if df_processed is not None:
                 df_plot = df_tail_analysis
 
                 # --- 선택한 항공기 예측 및 분석 (전체 기간) ---
-                st.subheader(f"1. {selected_tail} - {selected_target} 예측 분석 (전체 기간)")
+                st.subheader(f"1. {selected_tail} - {selected_target} 예측 분석")
                 
-                col1, col2 = st.columns(2)
-                with col1:
-                    show_outliers_on_plot = st.checkbox("예측 이상치 표시", value=False)
-                with col2:
-                    show_model_details = st.checkbox("모델 관련 세부사항", value=False)
-                st.caption("모델이 자동으로 감지한 이상치를 붉은색 'X'로 표시합니다.")
-
+                # === 수정된 부분: 토글 버튼 레이블 변경 ===
+                show_details = st.toggle(
+                    "자동 이상치 탐지 및 모델 세부 정보 표시", 
+                    value=False, 
+                    help="활성화하면 그래프에 예측 이상치를 표시하고, 하단에 이상치 목록과 모델 상세 정보를 함께 보여줍니다."
+                )
+                
                 if df_plot.empty:
                     st.warning(f"{selected_tail}에 대한 데이터가 없습니다.")
                 else:
@@ -367,32 +367,45 @@ if df_processed is not None:
                     model.fit(df_plot[[selected_target, 'Predicted']])
                     df_plot['outlier'] = model.fit_predict(df_plot[[selected_target, 'Predicted']])
                     outliers_df = df_plot[df_plot['outlier'] == -1].copy()
+                    
+                    unfiltered_outliers_exist = not outliers_df.empty 
+                    plot_title_period = "전체 기간"
+                    
+                    # HL8001이 선택된 경우, 시각화할 기간을 24년 7월부터 25년 3월까지로 제한
+                    if selected_tail == 'HL8001':
+                        start_date = pd.to_datetime('2024-07-01')
+                        end_date = pd.to_datetime('2025-03-31')
+                        # 플롯 데이터 필터링
+                        df_plot = df_plot[(df_plot['DATE'] >= start_date) & (df_plot['DATE'] <= end_date)].copy()
+                        # 플롯과 목록에 표시될 이상치 데이터도 동일하게 필터링
+                        outliers_df = outliers_df[(outliers_df['DATE'] >= start_date) & (outliers_df['DATE'] <= end_date)].copy()
+                        plot_title_period = "2024년 7월 ~ 2025년 3월"
 
-                    fig, axes = plt.subplots(2, 1, figsize=(15, 10), sharex=True)
+                    fig, axes = plt.subplots(2, 1, figsize=(15, 8), sharex=True)
                     
                     maint_dates = maint[maint['AC_NO'] == selected_tail]['NR_REQUEST_DATE'].dropna()
                     
-                    sns.lineplot(x='DATE', y=selected_target, data=df_plot, label=f'실제 {selected_target}', color='blue', ax=axes[0], marker='o', markersize=3, alpha=0.7)
-                    sns.lineplot(x='DATE', y='Predicted', data=df_plot, label=f'예측 {selected_target}', color='red', linestyle='--', ax=axes[0])
+                    sns.lineplot(x='DATE', y=selected_target, data=df_plot, label=f'실제 {selected_target}', color='blue', ax=axes[0], marker='o', markersize=3, alpha=0.7, errorbar=None)
+                    sns.lineplot(x='DATE', y='Predicted', data=df_plot, label=f'예측 {selected_target}', color='red', linestyle='--', ax=axes[0], errorbar=None)
                     
-                    if show_outliers_on_plot and not outliers_df.empty:
+                    if show_details and not outliers_df.empty:
                         axes[0].scatter(x=outliers_df['DATE'], y=outliers_df[selected_target], color='red', s=100, marker='X', label='Isolation Forest 이상치', zorder=5)
 
                     for i, date in enumerate(maint_dates.unique()):
                         axes[0].axvline(x=date, color='gold', linestyle='-', linewidth=4, label='정비 기록' if i == 0 else "")
-                    axes[0].set_title(f'{selected_tail} - {selected_target} 예측값 분석 (전체 기간)', fontsize=16)
+                    axes[0].set_title(f'{selected_tail} - {selected_target} 예측값 분석 ({plot_title_period})', fontsize=16)
                     axes[0].set_ylabel(f'{selected_target} 값')
                     axes[0].grid(True, linestyle='--', alpha=0.6)
                     axes[0].legend()
 
-                    max_abs_residual = df_plot['Residual'].abs().max()
+                    max_abs_residual = df_plot['Residual'].abs().max() if not df_plot.empty else 20
                     y_limit = max(20, max_abs_residual + 5)
                     axes[1].fill_between(df_plot['DATE'], df_plot['Residual'], 0, where=(df_plot['Residual'] > 0), color='red', alpha=0.3, label='과소 예측 (실제값 > 예측값)')
                     axes[1].fill_between(df_plot['DATE'], df_plot['Residual'], 0, where=(df_plot['Residual'] < 0), color='blue', alpha=0.3, label='과대 예측 (실제값 < 예측값)')
                     axes[1].axhline(y=0, color='gray', linestyle='--')
                     axes[1].set_ylim(-y_limit, y_limit)
                     
-                    if show_outliers_on_plot and not outliers_df.empty:
+                    if show_details and not outliers_df.empty:
                         axes[1].scatter(x=outliers_df['DATE'], y=outliers_df['Residual'], color='red', s=100, marker='X', label='Isolation Forest 이상치', zorder=5)
 
                     for i, date in enumerate(maint_dates.unique()):
@@ -407,19 +420,7 @@ if df_processed is not None:
                     plt.tight_layout()
                     st.pyplot(fig)
 
-                # 이상치 목록 출력 (체크박스가 True일 때만 실행)
-                if show_outliers_on_plot:
-                    if not outliers_df.empty:
-                        st.markdown("---")
-                        st.subheader(f"2. 자동으로 감지된 이상치 목록 ({selected_tail})")
-                        display_outliers = outliers_df[['DATE', selected_target, 'Predicted', 'Residual']].copy()
-                        display_outliers['DATE_STR'] = display_outliers['DATE'].dt.strftime('%Y-%m-%d %H:%M:%S')
-                        display_outliers.rename(columns={'DATE_STR': '날짜', selected_target: '실제값', 'Predicted': '예측값', 'Residual': '잔차'}, inplace=True)
-                        display_outliers.index = np.arange(1, len(display_outliers) + 1)
-                        st.dataframe(display_outliers[['날짜', '실제값', '예측값', '잔차']], height=240)
-                    else:
-                        st.info("Isolation Forest 분석 결과, 이상치가 감지되지 않았습니다.")
-
+                # --- 정비 기록 (항상 표시) ---
                 st.markdown("---")
                 st.markdown(f"##### {selected_tail} 정비 기록 (전체 기간)")
                 maint_records = maint[maint['AC_NO'] == selected_tail].copy()
@@ -431,37 +432,41 @@ if df_processed is not None:
                 else:
                     st.info("해당 기간에 정비 기록이 없습니다.")
                 
-                # --- 모델 관련 세부사항 섹션 (체크박스에 따라 표시) ---
-                if show_model_details:
+                if show_details:
+                    # --- 이상치 목록 섹션 ---
                     st.markdown("---")
-                    st.subheader("모델 관련 세부사항")
-                    
-                    # 예측 이상치 표시 여부에 따라 제목 번호 동적 할당
-                    if show_outliers_on_plot:
-                        section_3_title = "3. 통합 모델 학습 및 검증"
-                        section_4_title = "4. 학습에 사용된 피처 중요도 분석"
+                    st.subheader(f"2. 자동으로 감지된 이상치 목록 ({selected_tail})")
+                    if not outliers_df.empty:
+                        display_outliers = outliers_df[['DATE', selected_target, 'Predicted', 'Residual']].copy()
+                        display_outliers['DATE_STR'] = display_outliers['DATE'].dt.strftime('%Y-%m-%d %H:%M:%S')
+                        display_outliers.rename(columns={'DATE_STR': '날짜', selected_target: '실제값', 'Predicted': '예측값', 'Residual': '잔차'}, inplace=True)
+                        display_outliers.index = np.arange(1, len(display_outliers) + 1)
+                        st.dataframe(display_outliers[['날짜', '실제값', '예측값', '잔차']], height=240)
                     else:
-                        section_3_title = "2. 통합 모델 학습 및 검증"
-                        section_4_title = "3. 학습에 사용된 피처 중요도 분석"
+                        if unfiltered_outliers_exist and selected_tail == 'HL8001':
+                            st.info(f"표시된 기간({plot_title_period}) 내에서는 자동으로 감지된 이상치가 없습니다.")
+                        else:
+                            st.info("Isolation Forest 분석 결과, 이상치가 감지되지 않았습니다.")
+                    
+                    # --- 모델 관련 세부사항 섹션 ---
+                    st.markdown("---")
+                    st.subheader("3. 모델 관련 세부사항")
                     
                     model_col1, model_col2 = st.columns(2)
                     
                     with model_col1:
-                        # --- 모델 학습 및 교차검증 ---
-                        st.subheader(section_3_title)
+                        st.markdown("#### 3-1. 통합 모델 학습 및 검증")
                         st.write("시계열 교차검증(TimeSeriesSplit, n=5) 평균 성능:")
                         st.metric("R² Score", f"{np.mean(cv_scores['R2']):.3f}")
                         st.markdown("R² 점수는 **1에 가까울수록** 모델이 데이터를 잘 설명한다는 의미입니다.")
                     
                     with model_col2:
-                        # --- 학습에 사용된 피처 중요도 분석 ---
-                        st.subheader(section_4_title)
+                        st.markdown("#### 3-2. 학습에 사용된 피처 중요도 분석")
                         
                         numerical_feature_names = numerical_features
                         onehot_encoder = trained_pipeline.named_steps['preprocessor'].named_transformers_['onehot_categorical']
                         categorical_feature_names = list(onehot_encoder.get_feature_names_out(categorical_features))
                         
-                        # 피처 이름에 한국어 설명을 추가
                         def get_korean_name(feature):
                             if feature in feature_names_dict:
                                 return f'{feature} ({feature_names_dict[feature]})'
@@ -511,4 +516,3 @@ if df_processed is not None:
                             """)
                         else:
                             st.info("Lasso 모델의 페널티 설정으로 인해 모든 피처의 계수가 0이 되었습니다.")
-
