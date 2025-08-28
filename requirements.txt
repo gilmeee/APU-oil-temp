@@ -1,7 +1,11 @@
 streamlit
-scikit-learn
+matplotlib
 pandas
 numpy
-matplotlib
+scikit-learn
 plotly
 seaborn
+xgboost
+pyarrow
+# 한글 폰트
+nanumfont
