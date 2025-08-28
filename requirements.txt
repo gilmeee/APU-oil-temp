@@ -3,9 +3,7 @@ matplotlib
 pandas
 numpy
 scikit-learn
-plotly
 seaborn
+plotly
 xgboost
 pyarrow
-# 한글 폰트
-nanumfont
