@@ -21,25 +21,40 @@ import matplotlib.font_manager as fm
 warnings.filterwarnings('ignore')
 st.set_page_config(layout="wide", page_title="APU 결함 예측 및 데이터 분석 대시보드")
 
-# --- 폰트 파일 인코딩 함수 ---
-# 이 함수는 폰트 파일을 읽어서 CSS에서 사용할 수 있는 텍스트로 변환합니다.
-def encode_font(font_path):
-    # 파일이 존재하는지 확인합니다.
+# --- 폰트 파일 인코딩 함수 (CSS 전용) ---
+def encode_font(font_path: str):
     if not os.path.exists(font_path):
-        st.error(f"'{font_path}' 폰트 파일을 찾을 수 없습니다. 스크립트와 같은 폴더에 있는지 확인해주세요.")
+        # CSS용 폰트가 없어도 앱은 돌아가게 하고, 경고만 표시
+        st.warning(f"CSS용 폰트 파일을 찾을 수 없습니다: {font_path}")
         return None
-    with open(font_path, 'rb') as f:
-        return base64.b64encode(f.read()).decode('utf-8')
-        
+    with open(font_path, "rb") as f:
+        return base64.b64encode(f.read()).decode("utf-8")
 
-    # matplotlib 기본 내장 폰트 중 한글 지원하는 폰트 강제 지정
-    plt.rcParams['font.family'] = 'DejaVu Sans'
-    plt.rcParams['axes.unicode_minus'] = False
+
+# --- Matplotlib 한글 폰트 설정 (그래프 전용) ---
+def set_matplotlib_korean_font():
+    # 1) 로컬에 둔 Hanjin 폰트가 있으면 최우선 사용
+    for p in ["HanjinGroupSans.ttf", "HanjinGroupSansBold.ttf"]:
+        if os.path.exists(p):
+            try:
+                fm.fontManager.addfont(p)
+                name = fm.FontProperties(fname=p).get_name()
+                plt.rcParams["font.family"] = name
+                break
+            except Exception:
+                pass
+    else:
+        # 2) 없으면 matplotlib 내장 폰트로 안전하게
+        plt.rcParams["font.family"] = "DejaVu Sans"
+
+    # 음수 부호 깨짐 방지
     plt.rcParams["axes.unicode_minus"] = False
-    return chosen_name
+    return plt.rcParams["font.family"]
 
-_used = set_matplotlib_korean_font()
-# st.caption(f"matplotlib font → {_used}")  # 필요시 디버그용
+
+# (선택) 디버그: 실제 적용된 폰트명 확인하고 싶으면 다음 줄 주석 해제
+# st.caption(f"matplotlib font → {set_matplotlib_korean_font()}")
+set_matplotlib_korean_font()
 # --- 폰트 인코딩 실행 ---
 # 일반 글씨체와 굵은 글씨체를 각각 불러옵니다.
 regular_font_encoded = encode_font("HanjinGroupSans.ttf")
